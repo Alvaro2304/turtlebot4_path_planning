@@ -32,9 +32,9 @@ ARGUMENTS = [
     DeclareLaunchArgument('use_sim_time', default_value='true',
                           choices=['true', 'false'],
                           description='use_sim_time'),
-    DeclareLaunchArgument('world', default_value='maze',
+    DeclareLaunchArgument('world', default_value='maze_mod',
                           description='Ignition World'),
-    DeclareLaunchArgument('model', default_value='lite',
+    DeclareLaunchArgument('model', default_value='standard',
                           choices=['standard', 'lite'],
                           description='Turtlebot4 Model'),
 ]
@@ -64,6 +64,7 @@ def generate_launch_description():
         value=[
             os.path.join(pkg_turtlebot4_ignition_bringup, 'worlds'), ':' +
             os.path.join(pkg_irobot_create_ignition_bringup, 'worlds'), ':' +
+            os.path.join(pkg_turtlebot4_path_planning, 'worlds'), ':' +
             str(Path(pkg_turtlebot4_path_planning).parent.resolve()), ':' +
             str(Path(pkg_irobot_create_description).parent.resolve())])
 
