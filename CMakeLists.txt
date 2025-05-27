@@ -16,6 +16,8 @@ find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(ros_ign_interfaces REQUIRED)
 
@@ -26,9 +28,21 @@ ament_target_dependencies(talker rclcpp std_msgs)
 add_executable(listener src/subscriber_member_function.cpp)
 ament_target_dependencies(listener rclcpp std_msgs)
 
+add_executable(ekf_imu_encoder src/ekf_imu_encoder.cpp)
+ament_target_dependencies(ekf_imu_encoder
+  rclcpp tf2 tf2_ros tf2_geometry_msgs
+  geometry_msgs nav_msgs sensor_msgs
+)
+
+target_link_libraries(ekf_imu_encoder
+  ${rclcpp_LIBRARIES}
+  Eigen3::Eigen
+)
+
 install(TARGETS
   talker
   listener
+  ekf_imu_encoder
   DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY
