@@ -16,33 +16,34 @@ class EKFNode : public rclcpp::Node
 public:
     EKFNode() : Node("ekf_localization_node")
     {
-        // Initialize EKF state [x, y, theta, vx, vy, vtheta]
-        state_ = Eigen::VectorXd::Zero(6);
+        // Initialize EKF state [x, y, theta, v, omega]
+        state_ = Eigen::VectorXd::Zero(5);
         
         // Initialize covariance matrix (6x6)
-        covariance_ = Eigen::MatrixXd::Identity(6, 6) * 0.1;
+        covariance_ = Eigen::MatrixXd::Identity(5, 5) * 0.1;
         
         // Process noise covariance Q
-        Q_ = Eigen::MatrixXd::Identity(6, 6);
+        Q_ = Eigen::MatrixXd::Identity(5, 5);
         Q_(0, 0) = 0.01; // x position noise
         Q_(1, 1) = 0.01; // y position noise  
         Q_(2, 2) = 0.01; // theta noise
-        Q_(3, 3) = 0.1;  // vx noise
-        Q_(4, 4) = 0.1;  // vy noise
-        Q_(5, 5) = 0.1;  // vtheta noise
+        Q_(3, 3) = 0.1;  // v (linear velocity) noise
+        Q_(4, 4) = 0.1;  // omega (angular velocity) noise
         
         // Measurement noise covariance for odometry R_odom
-        R_odom_ = Eigen::MatrixXd::Identity(6, 6);
+        // Odometry gives us [x, y, theta, v, omega]
+        R_odom_ = Eigen::MatrixXd::Identity(5, 5);
         R_odom_(0, 0) = 0.05; // x measurement noise
         R_odom_(1, 1) = 0.05; // y measurement noise
         R_odom_(2, 2) = 0.02; // theta measurement noise
-        R_odom_(3, 3) = 0.2;  // vx measurement noise
-        R_odom_(4, 4) = 0.2;  // vy measurement noise
-        R_odom_(5, 5) = 0.1;  // vtheta measurement noise
+        R_odom_(3, 3) = 0.1;  // v measurement noise
+        R_odom_(4, 4) = 0.05; // omega measurement noise
         
-        // Measurement noise covariance for IMU R_imu (only angular velocity)
-        R_imu_ = Eigen::MatrixXd::Identity(1, 1);
-        R_imu_(0, 0) = 0.01; // angular velocity noise
+        // Measurement noise covariance for IMU
+        R_imu_ = Eigen::MatrixXd::Identity(3, 3);
+        R_imu_(0, 0) = 0.005; // orientation noise
+        R_imu_(1, 1) = 0.01; // angular velocity noise
+        R_imu_(2,2) = 0.01; // accel-derived velocity noise
         
         // TF Setup
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
@@ -61,7 +62,7 @@ public:
             
         // Timer for EKF prediction (higher frequency)
         prediction_timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(20), // 50 Hz
+            std::chrono::milliseconds(33), // 30 Hz
             std::bind(&EKFNode::predictionStep, this));
             
         last_prediction_time_ = this->get_clock()->now();
@@ -70,12 +71,12 @@ public:
     }
 
 private:
-    // EKF State: [x, y, theta, vx, vy, vtheta]
+    // EKF State: [x, y, theta, v, omega]
     Eigen::VectorXd state_;
     Eigen::MatrixXd covariance_;
     Eigen::MatrixXd Q_; // Process noise
     Eigen::MatrixXd R_odom_; // Odometry measurement noise
-    Eigen::MatrixXd R_imu_;  // IMU measurement noise
+    Eigen::MatrixXd R_imu_; //IMU measurement noise
     
     // TF components
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -90,6 +91,7 @@ private:
     
     // Timing
     rclcpp::Time last_prediction_time_;
+    rclcpp::Time last_imu_accel_time_;
     bool first_odom_received_ = false;
     bool first_imu_received_ = false;
     
@@ -102,38 +104,42 @@ private:
     {
         predicted_state = state;
         
-        // Update position based on velocity
-        predicted_state[0] += state[3] * cos(state[2]) * dt - state[4] * sin(state[2]) * dt; // x
-        predicted_state[1] += state[3] * sin(state[2]) * dt + state[4] * cos(state[2]) * dt; // y
-        predicted_state[2] += state[5] * dt; // theta
+        double x = state[0];
+        double y = state[1]; 
+        double theta = state[2];
+        double v = state[3];      // linear velocity
+        double omega = state[4];  // angular velocity
+        
+        // Differential drive kinematics
+        predicted_state[0] = x + v * cos(theta) * dt;  // x position
+        predicted_state[1] = y + v * sin(theta) * dt;  // y position  
+        predicted_state[2] = theta + omega * dt;       // orientation
         
         // Normalize theta to [-pi, pi]
         while (predicted_state[2] > M_PI) predicted_state[2] -= 2.0 * M_PI;
         while (predicted_state[2] < -M_PI) predicted_state[2] += 2.0 * M_PI;
         
-        // Velocities remain constant (could add acceleration model here)
-        // predicted_state[3], predicted_state[4], predicted_state[5] unchanged
+        // Velocities remain constant
+        //predicted_state[3] = v;     // unchanged
+        //predicted_state[4] = omega; // unchanged
     }
     
     // Jacobian of the motion model
     Eigen::MatrixXd getMotionJacobian(const Eigen::VectorXd& state, double dt)
     {
-        Eigen::MatrixXd F = Eigen::MatrixXd::Identity(6, 6);
+        Eigen::MatrixXd F = Eigen::MatrixXd::Identity(5, 5);
         
         double theta = state[2];
-        double vx = state[3];
-        double vy = state[4];
+        double v = state[3];
         
-        // Partial derivatives
-        F(0, 2) = -vx * sin(theta) * dt - vy * cos(theta) * dt; // dx/dtheta
-        F(0, 3) = cos(theta) * dt;  // dx/dvx
-        F(0, 4) = -sin(theta) * dt; // dx/dvy
+        // Partial derivatives for differential drive kinematics
+        F(0, 2) = -v * sin(theta) * dt; // dx/dtheta
+        F(0, 3) = cos(theta) * dt;      // dx/dv
         
-        F(1, 2) = vx * cos(theta) * dt - vy * sin(theta) * dt;  // dy/dtheta
-        F(1, 3) = sin(theta) * dt;  // dy/dvx
-        F(1, 4) = cos(theta) * dt;  // dy/dvy
+        F(1, 2) = v * cos(theta) * dt;  // dy/dtheta  
+        F(1, 3) = sin(theta) * dt;      // dy/dv
         
-        F(2, 5) = dt; // dtheta/dvtheta
+        F(2, 4) = dt;                   // dtheta/domega
         
         return F;
     }
@@ -149,7 +155,7 @@ private:
         if (dt <= 0.0) return;
         
         // Predict state
-        Eigen::VectorXd predicted_state(6);
+        Eigen::VectorXd predicted_state(5);
         motionModel(state_, dt, predicted_state);
         
         // Predict covariance
@@ -178,8 +184,8 @@ private:
             return;
         }
         
-        // Extract measurements [x, y, theta, vx, vy, vtheta]
-        Eigen::VectorXd z_odom(6);
+        // Extract measurements [x, y, theta, vx, omega]
+        Eigen::VectorXd z_odom(5);
         z_odom[0] = msg->pose.pose.position.x;
         z_odom[1] = msg->pose.pose.position.y;
         
@@ -191,11 +197,10 @@ private:
         z_odom[2] = yaw;
         
         z_odom[3] = msg->twist.twist.linear.x;
-        z_odom[4] = msg->twist.twist.linear.y;
-        z_odom[5] = msg->twist.twist.angular.z;
+        z_odom[4] = msg->twist.twist.angular.z;
         
         // Measurement model (direct observation)
-        Eigen::MatrixXd H_odom = Eigen::MatrixXd::Identity(6, 6);
+        Eigen::MatrixXd H_odom = Eigen::MatrixXd::Identity(5, 5);
         
         // EKF Update
         ekfUpdate(z_odom, H_odom, R_odom_);
@@ -210,22 +215,51 @@ private:
         latest_imu_ = msg;
         
         if (!first_odom_received_) return; // Wait for odometry initialization
+
+        if (!first_imu_received_) {
+            last_imu_accel_time_ = rclcpp::Time(msg->header.stamp);
+            first_imu_received_ = true;
+            return;
+        }
         
-        first_imu_received_ = true;
+        rclcpp::Time current_time = rclcpp::Time(msg->header.stamp);
+        double dt = (current_time - last_imu_accel_time_).seconds();
         
-        // Extract angular velocity measurement
-        Eigen::VectorXd z_imu(1);
-        z_imu[0] = msg->angular_velocity.z; // Assuming IMU is aligned with robot
+        // Sanity checks
+        if (dt <= 0.0 || dt > 0.1) {
+            last_imu_accel_time_ = current_time;
+            return;
+        }
+
+        double ax_robot = msg->linear_acceleration.x; // Forward acceleration
+        
+        // Extract orientation measurement
+        Eigen::VectorXd z_imu(3);
+        tf2::Quaternion quat;
+        tf2::fromMsg(msg->orientation, quat);
+        double roll, pitch, yaw;
+        tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+        z_imu[0] = yaw;
+        
+        double predicted_v_change = ax_robot * dt;
+        double expected_new_v = state_[3] + predicted_v_change;
+        z_imu[1] = expected_new_v;
+
+        z_imu[2] = msg->angular_velocity.z;
+
+        
         
         // Measurement model (observe angular velocity)
-        Eigen::MatrixXd H_imu(1, 6);
+        Eigen::MatrixXd H_imu(3, 5);
         H_imu.setZero();
-        H_imu(0, 5) = 1.0; // Observe vtheta
+        H_imu(0, 2) = 1.0; // Observe theta
+        H_imu(1, 3) = 1.0; // Observe velocity
+        H_imu(2, 4) = 1.0; // Observe omega
         
         // EKF Update
         ekfUpdate(z_imu, H_imu, R_imu_);
         
-        RCLCPP_DEBUG(this->get_logger(), "IMU update: angular_vel=%.3f", z_imu[0]);
+        RCLCPP_DEBUG(this->get_logger(), "IMU update: angular_vel=%.3f", z_imu[2]);
     }
     
     // Generic EKF update step
@@ -248,7 +282,7 @@ private:
         
         // Update state and covariance
         state_ = state_ + K * y;
-        Eigen::MatrixXd I = Eigen::MatrixXd::Identity(6, 6);
+        Eigen::MatrixXd I = Eigen::MatrixXd::Identity(5, 5);
         covariance_ = (I - K * H) * covariance_;
         
         // Normalize theta
@@ -269,8 +303,7 @@ private:
         state_[2] = yaw;
         
         state_[3] = msg->twist.twist.linear.x;
-        state_[4] = msg->twist.twist.linear.y;
-        state_[5] = msg->twist.twist.angular.z;
+        state_[4] = msg->twist.twist.angular.z;
         
         RCLCPP_INFO(this->get_logger(), "EKF initialized: x=%.3f, y=%.3f, theta=%.3f", 
                     state_[0], state_[1], state_[2]);
@@ -279,9 +312,17 @@ private:
     // Publish TF transform and odometry message
     void publishResults(const rclcpp::Time& timestamp)
     {
+        // Use the latest sensor timestamp instead of prediction time when available
+        rclcpp::Time publish_time = timestamp;
+
+        // If we have recent sensor data, use its timestamp
+        //if (latest_odom_ && (timestamp - latest_odom_->header.stamp).seconds() < 0.1) {
+        //publish_time = latest_odom_->header.stamp;
+    //}
+        
         // Publish TF transform
         geometry_msgs::msg::TransformStamped transform;
-        transform.header.stamp = timestamp;
+        transform.header.stamp = publish_time;
         transform.header.frame_id = "odom";
         transform.child_frame_id = "base_link";
         
@@ -297,7 +338,7 @@ private:
         
         // Publish filtered odometry
         nav_msgs::msg::Odometry odom_msg;
-        odom_msg.header.stamp = timestamp;
+        odom_msg.header.stamp = publish_time;
         odom_msg.header.frame_id = "odom";
         odom_msg.child_frame_id = "base_link";
         
@@ -309,16 +350,21 @@ private:
         
         // Twist
         odom_msg.twist.twist.linear.x = state_[3];
-        odom_msg.twist.twist.linear.y = state_[4];
-        odom_msg.twist.twist.angular.z = state_[5];
+        odom_msg.twist.twist.linear.y = 0.0;
+        odom_msg.twist.twist.angular.z = state_[4];
         
-        // Covariance (simplified - map 6x6 to 6x6 pose covariance)
-        for (int i = 0; i < 6; ++i) {
-            for (int j = 0; j < 6; ++j) {
-                odom_msg.pose.covariance[i * 6 + j] = covariance_(i, j);
-                odom_msg.twist.covariance[i * 6 + j] = covariance_(i, j);
-            }
-        }
+        // Covariance (map 5x5 to 6x6 pose/twist covariance matrices)
+        // Initialize covariance arrays to zero
+        std::fill(odom_msg.pose.covariance.begin(), odom_msg.pose.covariance.end(), 0.0);
+        std::fill(odom_msg.twist.covariance.begin(), odom_msg.twist.covariance.end(), 0.0);
+        
+        // Map relevant covariances
+        odom_msg.pose.covariance[0] = covariance_(0, 0);   // x-x
+        odom_msg.pose.covariance[7] = covariance_(1, 1);   // y-y  
+        odom_msg.pose.covariance[35] = covariance_(2, 2);  // yaw-yaw
+        
+        odom_msg.twist.covariance[0] = covariance_(3, 3);  // vx-vx
+        odom_msg.twist.covariance[35] = covariance_(4, 4); // vyaw-vyaw
         
         odom_pub_->publish(odom_msg);
     }
