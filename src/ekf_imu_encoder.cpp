@@ -14,8 +14,10 @@
 class EKFNode : public rclcpp::Node
 {
 public:
-    EKFNode() : Node("ekf_localization_node")
+    EKFNode(const rclcpp::NodeOptions &options = rclcpp::NodeOptions()) : Node("ekf_localization_node",options)
     {
+        this->set_parameter(rclcpp::Parameter("use_sim_time", true));
+        
         // Initialize EKF state [x, y, theta, v, omega]
         state_ = Eigen::VectorXd::Zero(5);
         
@@ -62,7 +64,7 @@ public:
             
         // Timer for EKF prediction (higher frequency)
         prediction_timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(33), // 30 Hz
+            std::chrono::milliseconds(20), // 50 Hz
             std::bind(&EKFNode::predictionStep, this));
             
         last_prediction_time_ = this->get_clock()->now();

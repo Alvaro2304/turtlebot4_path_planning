@@ -50,6 +50,7 @@ install(DIRECTORY
   meshes
   urdf
   worlds
+  config
   DESTINATION share/${PROJECT_NAME}/
 )
 
