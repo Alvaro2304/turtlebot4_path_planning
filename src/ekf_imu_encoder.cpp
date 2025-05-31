@@ -52,22 +52,25 @@ public:
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
         
+        // Replace your current subscriptions with:
+        auto qos = rclcpp::QoS(10).reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
+
         // Subscribers
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/odom", 10, std::bind(&EKFNode::odomCallback, this, std::placeholders::_1));
+            "/odom", qos, std::bind(&EKFNode::odomCallback, this, std::placeholders::_1));
             
         imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-            "/imu", 10, std::bind(&EKFNode::imuCallback, this, std::placeholders::_1));
+            "/imu", qos, std::bind(&EKFNode::imuCallback, this, std::placeholders::_1));
         
         // Publisher for fused odometry
         odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/odometry/filtered", 10);
             
         // Timer for EKF prediction (higher frequency)
         prediction_timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(20), // 50 Hz
+            std::chrono::milliseconds(50), // 50 Hz
             std::bind(&EKFNode::predictionStep, this));
             
-        last_prediction_time_ = this->get_clock()->now();
+        
         
         RCLCPP_INFO(this->get_logger(), "EKF Localization Node Started");
     }
@@ -149,12 +152,35 @@ private:
     // EKF Prediction Step
     void predictionStep()
     {
-        if (!first_odom_received_) return;
+        if (!first_odom_received_){
+            RCLCPP_INFO(this->get_logger(), "Prediction step skipped - no odom yet");
+            return;
+        }
         
+        //RCLCPP_INFO(this->get_logger(), "Running prediction step");
+
         auto current_time = this->get_clock()->now();
+
+        // Initialize last_prediction_time_ if this is the first prediction after initialization
+        if (last_prediction_time_.seconds() == 0.0) {
+            last_prediction_time_ = current_time;
+            //RCLCPP_INFO(this->get_logger(), "Initializing prediction timer");
+            return;
+        }
+
         double dt = (current_time - last_prediction_time_).seconds();
         
-        if (dt <= 0.0) return;
+        if (dt <= 0.0){
+            RCLCPP_WARN(this->get_logger(), "Invalid dt: %.6f", dt);
+            return;
+        }
+
+        // Skip if dt is too large (indicates timing jump)
+        if (dt > 1.0) {
+            RCLCPP_WARN(this->get_logger(), "Large dt detected: %.6f, resetting timer", dt);
+            last_prediction_time_ = current_time;
+            return;
+        }
         
         // Predict state
         Eigen::VectorXd predicted_state(5);
@@ -177,12 +203,15 @@ private:
     // Odometry callback - full state update
     void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
+        //RCLCPP_INFO(this->get_logger(), "Received odometry message");
+
         latest_odom_ = msg;
         
         if (!first_odom_received_) {
             // Initialize state with first odometry measurement
             initializeState(msg);
             first_odom_received_ = true;
+            RCLCPP_INFO(this->get_logger(), "First odom received and initialized"); 
             return;
         }
         
@@ -214,6 +243,7 @@ private:
     // IMU callback - angular velocity update only
     void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
     {
+        //RCLCPP_INFO(this->get_logger(), "Received IMU message");
         latest_imu_ = msg;
         
         if (!first_odom_received_) return; // Wait for odometry initialization
