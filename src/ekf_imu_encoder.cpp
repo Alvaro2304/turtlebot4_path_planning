@@ -34,12 +34,12 @@ public:
         
         // Measurement noise covariance for odometry R_odom
         // Odometry gives us [x, y, theta, v, omega]
-        R_odom_ = Eigen::MatrixXd::Identity(5, 5);
-        R_odom_(0, 0) = 10.; // x measurement noise
-        R_odom_(1, 1) = 10.; // y measurement noise
-        R_odom_(2, 2) = 10.; // theta measurement noise
-        R_odom_(3, 3) = 1;  // v measurement noise
-        R_odom_(4, 4) = 10.; // omega measurement noise
+        R_odom_ = Eigen::MatrixXd::Identity(2, 2);
+        //R_odom_(0, 0) = 10.; // x measurement noise
+        //R_odom_(1, 1) = 10.; // y measurement noise
+        //R_odom_(2, 2) = 10.; // theta measurement noise
+        R_odom_(0, 0) = 0.5;  // v measurement noise
+        R_odom_(1, 1) = 10.; // omega measurement noise
         
         // Measurement noise covariance for IMU
         R_imu_ = Eigen::MatrixXd::Identity(3, 3);
@@ -222,28 +222,32 @@ private:
         }
         
         // Extract measurements [x, y, theta, vx, omega]
-        Eigen::VectorXd z_odom(5);
-        z_odom[0] = msg->pose.pose.position.x;
-        z_odom[1] = msg->pose.pose.position.y;
+        Eigen::VectorXd z_odom(2);
+        //z_odom[0] = msg->pose.pose.position.x;
+        //z_odom[1] = msg->pose.pose.position.y;
         
         // Convert quaternion to yaw
-        tf2::Quaternion quat;
-        tf2::fromMsg(msg->pose.pose.orientation, quat);
-        double roll, pitch, yaw;
-        tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
-        z_odom[2] = yaw;
+        //tf2::Quaternion quat;
+        //tf2::fromMsg(msg->pose.pose.orientation, quat);
+        //double roll, pitch, yaw;
+        //tf2::Matrix3x3(quat).getRPY(roll, pitch, yaw);
+        //z_odom[2] = yaw;
         
-        z_odom[3] = msg->twist.twist.linear.x;
-        z_odom[4] = msg->twist.twist.angular.z;
+        z_odom[0] = msg->twist.twist.linear.x;
+        z_odom[1] = msg->twist.twist.angular.z;
         
-        // Measurement model (direct observation)
-        Eigen::MatrixXd H_odom = Eigen::MatrixXd::Identity(5, 5);
+        // Measurement model (observe angular velocity)
+        Eigen::MatrixXd H_odom(2, 5);
+        H_odom.setZero();
+        H_odom(0, 3) = 1.0; // Observe v
+        H_odom(1, 4) = 1.0; // Observe omega
+
         
         // EKF Update
         ekfUpdate(z_odom, H_odom, R_odom_);
         
-        RCLCPP_DEBUG(this->get_logger(), "Odometry update: x=%.3f, y=%.3f, theta=%.3f", 
-                     state_[0], state_[1], state_[2]);
+        //RCLCPP_DEBUG(this->get_logger(), "Odometry update: x=%.3f, y=%.3f, theta=%.3f", 
+                     //state_[0], state_[1], state_[2]);
     }
     
     // IMU callback - angular velocity update only
