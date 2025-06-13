@@ -21,31 +21,31 @@ public:
         // Initialize EKF state [x, y, theta, v, omega]
         state_ = Eigen::VectorXd::Zero(5);
         
-        // Initialize covariance matrix (6x6)
+        // Initialize covariance matrix (5x5)
         covariance_ = Eigen::MatrixXd::Identity(5, 5) * 0.1;
         
         // Process noise covariance Q
         Q_ = Eigen::MatrixXd::Identity(5, 5);
-        Q_(0, 0) = 0.01; // x position noise
-        Q_(1, 1) = 0.01; // y position noise  
-        Q_(2, 2) = 0.01; // theta noise
-        Q_(3, 3) = 0.1;  // v (linear velocity) noise
-        Q_(4, 4) = 0.1;  // omega (angular velocity) noise
+        Q_(0, 0) = 0.00001; // x position noise
+        Q_(1, 1) = 0.00001; // y position noise  
+        Q_(2, 2) = 2.; // theta noise
+        Q_(3, 3) = 0.8;  // v (linear velocity) noise
+        Q_(4, 4) = 2.;  // omega (angular velocity) noise
         
         // Measurement noise covariance for odometry R_odom
         // Odometry gives us [x, y, theta, v, omega]
         R_odom_ = Eigen::MatrixXd::Identity(5, 5);
-        R_odom_(0, 0) = 0.05; // x measurement noise
-        R_odom_(1, 1) = 0.05; // y measurement noise
-        R_odom_(2, 2) = 0.02; // theta measurement noise
-        R_odom_(3, 3) = 0.1;  // v measurement noise
-        R_odom_(4, 4) = 0.05; // omega measurement noise
+        R_odom_(0, 0) = 10.; // x measurement noise
+        R_odom_(1, 1) = 10.; // y measurement noise
+        R_odom_(2, 2) = 10.; // theta measurement noise
+        R_odom_(3, 3) = 1;  // v measurement noise
+        R_odom_(4, 4) = 10.; // omega measurement noise
         
         // Measurement noise covariance for IMU
         R_imu_ = Eigen::MatrixXd::Identity(3, 3);
-        R_imu_(0, 0) = 0.005; // orientation noise
-        R_imu_(1, 1) = 0.01; // angular velocity noise
-        R_imu_(2,2) = 0.01; // accel-derived velocity noise
+        R_imu_(0, 0) = 0.00001; // orientation noise
+        R_imu_(1, 1) = 1.; // v noise (accel-derived)
+        R_imu_(2,2) = 0.00001; // omega noise
         
         // TF Setup
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
@@ -67,7 +67,7 @@ public:
             
         // Timer for EKF prediction (higher frequency)
         prediction_timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(50), // 50 Hz
+            std::chrono::milliseconds(20), // 50 Hz
             std::bind(&EKFNode::predictionStep, this));
             
         
@@ -153,7 +153,7 @@ private:
     void predictionStep()
     {
         if (!first_odom_received_){
-            RCLCPP_INFO(this->get_logger(), "Prediction step skipped - no odom yet");
+            //RCLCPP_INFO(this->get_logger(), "Prediction step skipped - no odom yet");
             return;
         }
         
@@ -170,17 +170,23 @@ private:
 
         double dt = (current_time - last_prediction_time_).seconds();
         
-        if (dt <= 0.0){
-            RCLCPP_WARN(this->get_logger(), "Invalid dt: %.6f", dt);
-            return;
+        if (dt <= 1e-6) {  // Use small epsilon instead of 0.0
+        RCLCPP_DEBUG(this->get_logger(), "Skipping prediction: dt too small (%.9f)", dt);
+        return;  // Don't update last_prediction_time_
         }
-
-        // Skip if dt is too large (indicates timing jump)
+        
         if (dt > 1.0) {
             RCLCPP_WARN(this->get_logger(), "Large dt detected: %.6f, resetting timer", dt);
             last_prediction_time_ = current_time;
             return;
         }
+        
+        // Add minimum dt threshold for stability
+        if (dt < 0.001) {  // Less than 1ms
+            RCLCPP_DEBUG(this->get_logger(), "Small dt: %.6f, skipping prediction", dt);
+            return;
+        }
+
         
         // Predict state
         Eigen::VectorXd predicted_state(5);

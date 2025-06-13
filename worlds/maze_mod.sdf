@@ -56,8 +56,8 @@
                           <ode>
 			    <mu>0.8</mu>      <!-- default ~1.0 -->
 			    <mu2>0.8</mu2>
-			    <slip1>0.1</slip1> <!-- slip added -->
-			    <slip2>0.1</slip2>
+			    <!--slip1>0.1</slip1> 
+			    <slip2>0.1</slip2-->
 			  </ode>
                         </friction>
                         <bounce />

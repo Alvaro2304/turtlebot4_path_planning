@@ -94,13 +94,13 @@ def generate_launch_description():
         arguments=[
             ['/world/', world,
              '/model/', robot_name,
-             '/joint/oakd_imu_joint/sensor/imu_sensor/imu' +
+             '/link/imu_link/sensor/imu/imu' +
              '@sensor_msgs/msg/Imu[ignition.msgs.IMU']
         ],
         remappings=[
             (['/world/', world,
               '/model/', robot_name,
-              '/joint/oakd_imu_joint/sensor/imu_sensor/imu'],
+              '/link/imu_link/sensor/imu/imu'],
              'imu')
         ])
 
