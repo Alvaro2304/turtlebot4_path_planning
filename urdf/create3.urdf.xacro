@@ -59,6 +59,20 @@
   <xacro:property name="emitter_link_name" value="halo_link"/>
   <xacro:arg name="visualize_rays" default="false"/>
   <!-- Create 3 base definition-->
+  
+   <!-- BASE_FOOTPRINT LINK -->
+
+    <joint name="base_footprint_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="base_footprint"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="base_footprint">
+    </link>
+
+    <!-- -->
+  
   <link name="base_link">
     <visual>
       <origin xyz="0 0 ${body_z_offset + base_link_z_offset}" rpy="0 0 ${pi/2}"/>
