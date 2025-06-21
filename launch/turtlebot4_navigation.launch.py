@@ -63,8 +63,18 @@ def generate_launch_description():
             output='screen',
             parameters=[{'waypoints_file': LaunchConfiguration('waypoints_file')},
                         {'use_sim_time': True}]
-        )
+        ),
         
+
+        Node(
+            package='turtlebot4_path_planning',
+            executable='initial_pose_publisher',
+            name='initial_pose_publisher',
+            output='screen',
+            parameters=[{'waypoints_file': LaunchConfiguration('waypoints_file')},
+                        {'use_sim_time': True}]
+        )
+
 
         
     ])
