@@ -43,9 +43,9 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'autostart': True,  # this tells lifecycle manager to activate all nodes automatically
-                'node_names': [
-                    'map_server',
+                'node_names': [ 
                     'amcl',
+                    'map_server',
                     'planner_server',
                     'controller_server',
                     'bt_navigator',

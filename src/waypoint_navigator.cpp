@@ -32,6 +32,10 @@ public:
     // Declare a ROS parameter for the YAML file containing waypoints
     this->declare_parameter<std::string>("waypoints_file", "");
 
+    // Lifecycle client for bt_navigator state
+    lifecycle_client_ = this->create_client<lifecycle_msgs::srv::GetState>("/bt_navigator/get_state");
+
+
     // Set up client to communicate with Nav2's "navigate_to_pose" action server
     client_ = rclcpp_action::create_client<NavigateToPose>(this, "navigate_to_pose");
 
@@ -54,6 +58,8 @@ public:
 private:
   // Client to send navigation goals
   rclcpp_action::Client<NavigateToPose>::SharedPtr client_;
+  // Client for receiving the bt_navigator state
+  rclcpp::Client<lifecycle_msgs::srv::GetState>::SharedPtr lifecycle_client_;
   // Periodic timer
   rclcpp::TimerBase::SharedPtr timer_;
   // List of waypoints to visit
@@ -68,33 +74,15 @@ private:
   // Subscription to detect when AMCL has received initial pose
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr amcl_sub_;
 
+  
+
   // State flags
   bool sent_ = false;
   bool initial_pose_received_ = false;
+  bool nav2_active_ = false;
+  bool waiting_for_lifecycle_response_ = false;
+  
 
-  // === Helper: Check if bt_navigator is active via lifecycle service ===
-  bool isNav2Active()
-  {
-    auto client = this->create_client<lifecycle_msgs::srv::GetState>("/bt_navigator/get_state");
-    if (!client->wait_for_service(1s)) {
-      RCLCPP_WARN(this->get_logger(), "Timed out waiting for bt_navigator/get_state service.");
-      return false;
-    }
-
-    auto request = std::make_shared<lifecycle_msgs::srv::GetState::Request>();
-    auto future = client->async_send_request(request);
-
-    // Spin until we get a response or timeout
-    if (rclcpp::spin_until_future_complete(shared_from_this(), future, 2s)
-        != rclcpp::FutureReturnCode::SUCCESS)
-    {
-      RCLCPP_WARN(this->get_logger(), "Failed to call get_state on bt_navigator.");
-      return false;
-    }
-
-    auto state = future.get()->current_state.label;
-    return state == "active";
-  }
 
   // === Timer callback: Drives waypoint sending logic ===
   void timerCallback()
@@ -113,15 +101,15 @@ private:
       return;
     }
 
-    // Ensure AMCL has a pose (user has clicked "2D Pose Estimate")
-    if (!initial_pose_received_) {
-      RCLCPP_WARN(this->get_logger(), "Waiting for initial pose from AMCL...");
-      return;
-    }
-
     // Ensure we can transform between map and base_link (TF is live)
     if (!tf_buffer_.canTransform("map", "base_link", tf2::TimePointZero, tf2::durationFromSec(1.0))) {
       RCLCPP_WARN(this->get_logger(), "Waiting for map -> base_link transform...");
+      return;
+    }
+
+    // Ensure AMCL has a pose (user has clicked "2D Pose Estimate")
+    if (!initial_pose_received_) {
+      RCLCPP_WARN(this->get_logger(), "Waiting for initial pose from AMCL...");
       return;
     }
 
@@ -137,11 +125,47 @@ private:
     }
   }
 
+  // === Helper: Check if bt_navigator is active via lifecycle service ===
+  bool isNav2Active()
+  {
+    if (nav2_active_) {
+      return true;
+    }
+
+    if (!waiting_for_lifecycle_response_) {
+      if (!lifecycle_client_->service_is_ready()) {
+        RCLCPP_WARN(this->get_logger(), "bt_navigator/get_state service not ready.");
+        return false;
+      }
+
+      auto request = std::make_shared<lifecycle_msgs::srv::GetState::Request>();
+
+      lifecycle_client_->async_send_request(request,
+        [this](rclcpp::Client<lifecycle_msgs::srv::GetState>::SharedFuture future) {
+          auto response = future.get();
+          std::string state = response->current_state.label;
+          RCLCPP_INFO(this->get_logger(), "bt_navigator current state: %s", state.c_str());
+
+          if (state == "active") {
+            nav2_active_ = true;
+          }
+
+          waiting_for_lifecycle_response_ = false;
+        });
+
+      waiting_for_lifecycle_response_ = true;
+    }
+
+    return false;
+  }
+
+
   // === Load waypoints from YAML file ===
   bool loadWaypointsFromFile()
   {
     std::string file_path;
     this->get_parameter("waypoints_file", file_path);
+    RCLCPP_INFO(this->get_logger(), "Waypoints file path: %s", file_path.c_str());
     if (file_path.empty()) {
       RCLCPP_ERROR(this->get_logger(), "waypoints_file parameter is empty.");
       return false;
