@@ -22,9 +22,16 @@ def generate_launch_description():
         description='Full path to waypoint yaml file'
     )
 
+    nav2_arg=DeclareLaunchArgument(
+        'nav2_params',
+        default_value=os.path.join(pkg_turtlebot4_path_planning, 'config', 'nav2_params.yaml'),
+        description='Path to Nav2 param file'
+)
+
     return LaunchDescription([
         map_arg,
         wp_arg,
+        nav2_arg,
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
@@ -32,28 +39,9 @@ def generate_launch_description():
             ),
             launch_arguments={
                 'map': LaunchConfiguration('map'),
+                'params_file': LaunchConfiguration('nav2_params'),
                 'use_sim_time': 'true'
             }.items()
-        ),
-
-        Node(
-            package='nav2_lifecycle_manager',
-            executable='lifecycle_manager',
-            name='lifecycle_manager_navigation',
-            output='screen',
-            parameters=[{
-                'autostart': True,  # this tells lifecycle manager to activate all nodes automatically
-                'node_names': [ 
-                    'amcl',
-                    'map_server',
-                    'planner_server',
-                    'controller_server',
-                    'bt_navigator',
-                    'waypoint_follower',
-                    'velocity_smoother',
-                    'behavior_server'
-                ]
-            }]
         ),
 
         Node(
