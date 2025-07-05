@@ -33,7 +33,8 @@ controller_server:
       linear_granularity: 0.05
       angular_granularity: 0.025
       trajectory_generator_name: "dwb_plugins::StandardTrajectoryGenerator"
-      critics: ["RotateToGoal", "PathAlign", "GoalAlign", "PathDist", "GoalDist"]
+      critics: ["RotateToGoal", "PathAlign", "GoalAlign", "PathDist", "GoalDist", "BaseObstacle"]
+      BaseObstacle.scale: 0.02
       RotateToGoal.scale: 32.0
       PathAlign.scale: 32.0
       GoalAlign.scale: 24.0
@@ -64,3 +65,70 @@ behavior_server:
 velocity_smoother:
   ros__parameters:
     use_sim_time: true
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency: 5.0
+      publish_frequency: 5.0
+      global_frame: odom
+      robot_base_frame: base_link
+      use_sim_time: true
+      rolling_window: true
+      width: 3
+      height: 3
+      resolution: 0.05
+      robot_radius: 0.13
+      plugins: ["obstacle_layer", "inflation_layer"]
+  
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          clearing: true
+          marking: true
+          max_obstacle_height: 2.0
+  
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.5
+        cost_scaling_factor: 0.2
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_link
+      use_sim_time: true
+      rolling_window: true
+      width: 30
+      height: 30
+      resolution: 0.05
+      robot_radius: 0.13
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+  
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+  
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          clearing: true
+          marking: true
+          max_obstacle_height: 2.0
+  
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.5
+        inflation_radius: 0.5
+        cost_scaling_factor: 0.2
